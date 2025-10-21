@@ -9,11 +9,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 
-// Troque o caminho se sua logo tiver outro nome/locais:
+// sua imagem já está no projeto:
 import logo from "@/assets/gestor-ia.png";
 
 const Auth: React.FC = () => {
-  // defina true para começar em "Entrar"
+  // true = começar em Entrar | false = começar em Criar conta
   const [isLogin, setIsLogin] = useState<boolean>(true);
 
   const [emailOrPhone, setEmailOrPhone] = useState<string>("");
@@ -39,53 +39,27 @@ const Auth: React.FC = () => {
       : `${value.replace(/\D/g, "")}@iazapuser.com`;
   };
 
-  // Garante linha na sua tabela "usuarios" e retorna o id numérico
+  // UPSERT em `usuarios` (garante que exista linha com id numérico)
   const ensureUsuarioRow = async (email: string, phoneGuess?: string) => {
-    // se a tabela não existir, isso vai lançar erro — tratamos abaixo
-    const { data: found, error: findError } = await supabase
-      .from("usuarios")
-      .select("id")
-      .eq("email", email)
-      .maybeSingle();
-
-    if (findError) throw findError;
-    if (found?.id) return found.id as number;
-
-    const payload: any = {
-      nome: username || "Usuário",
+    const payload: Record<string, any> = {
+      nome: username || "Novo usuário",
       email,
       telefone: phoneGuess || null,
-      mensagens: 0,
-      tem_plano: false,
     };
 
-    const { data: inserted, error: insertError } = await supabase
+    const { data, error } = await supabase
       .from("usuarios")
-      .insert(payload)
+      .upsert(payload, { onConflict: "email" })
       .select("id")
       .single();
 
-    if (insertError) throw insertError;
-    return inserted.id as number;
+    if (error) throw error;
+    return data.id as number;
   };
 
   const completeLogin = async (email: string, phoneGuess?: string) => {
-    try {
-      const usuarioId = await ensureUsuarioRow(email, phoneGuess);
-      localStorage.setItem("usuario_id", String(usuarioId));
-    } catch (err: any) {
-      // Se aparecer "Não foi possível encontrar a tabela 'public.usuarios'...",
-      // significa que a tabela não existe no seu Supabase.
-      console.error("Erro ao garantir usuario:", err?.message || err);
-      toast({
-        title: "Falha ao logar",
-        description:
-          "Tabela 'usuarios' não encontrada no Supabase. Rode o SQL de criação ou ajuste o nome da tabela.",
-        variant: "destructive",
-      });
-      return;
-    }
-
+    const usuarioId = await ensureUsuarioRow(email, phoneGuess);
+    localStorage.setItem("usuario_id", String(usuarioId));
     toast({ title: "Login realizado!", description: "Bem-vindo(a) 👋" });
     navigate("/");
   };
@@ -115,15 +89,13 @@ const Auth: React.FC = () => {
         if (data?.session) await completeLogin(email, phoneGuess);
       } else {
         // ===== CRIAR CONTA =====
-        // Cria no Auth (senha fica só no Auth)
         const { error: signUpError } = await supabase.auth.signUp({ email, password });
         if (signUpError) throw signUpError;
 
-        // Login imediato após cadastro (desative "Confirm email before sign in" no painel p/ funcionar)
+        // login imediato após cadastro (desative "Confirm email before sign in" no painel para funcionar direto)
         const { data, error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
         if (signInErr) throw signInErr;
 
-        // Garante perfil na sua tabela
         await completeLogin(email, phoneGuess);
 
         toast({
