@@ -1,3 +1,4 @@
+// src/pages/Index.tsx
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { FinanceSummaryCard } from "@/components/FinanceSummaryCard";
@@ -11,59 +12,53 @@ import { useNavigate } from "react-router-dom";
 import { startOfMonth, endOfMonth, isWithinInterval, parseISO } from "date-fns";
 
 interface Transaction {
-  id: string;
+  id: number;
   created_at: string;
   descricao: string;
   valor: number;
-  tipo: string;
-  data: string;
+  tipo: string;        // "entrada" | "saida"
+  data: string;        // YYYY-MM-DD
   esta_pago: boolean;
-  user_id: number;
+  user_id: number;     // numérico
 }
 
 const Index = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState({
-    from: startOfMonth(new Date()),
-    to: endOfMonth(new Date()),
-  });
   const { toast } = useToast();
   const navigate = useNavigate();
 
+  const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>({
+    from: startOfMonth(new Date()),
+    to: endOfMonth(new Date()),
+  });
+
   useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) navigate("/auth");
+    };
     checkAuth();
-  }, []);
+  }, [navigate]);
 
-  const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    
-    if (!session) {
-      navigate("/auth");
-      return;
-    }
-
-    fetchTransactions();
-  };
+  useEffect(() => { fetchTransactions(); }, [dateRange]);
 
   const fetchTransactions = async () => {
+    setLoading(true);
     try {
+      const usuarioId = Number(localStorage.getItem("usuario_id"));
+
       const { data, error } = await supabase
         .from("transacoes")
         .select("*")
-        .eq("user_id", Number(localStorage.getItem("usuario_id")))
+        .eq("user_id", usuarioId)
         .order("data", { ascending: false });
 
       if (error) throw error;
-
-      setTransactions(data || []);
+      setTransactions((data || []) as Transaction[]);
     } catch (error) {
       console.error("Erro ao buscar transações:", error);
-      toast({
-        title: "Erro",
-        description: "Não foi possível carregar as transações",
-        variant: "destructive",
-      });
+      toast({ title: "Erro", description: "Não foi possível carregar as transações", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -74,77 +69,52 @@ const Index = () => {
     return isWithinInterval(transactionDate, { start: dateRange.from, end: dateRange.to });
   });
 
+  const toKind = (t: string) => (t === "saida" ? "despesa" : t === "entrada" ? "receita" : t);
+
   const calculateSummary = () => {
     const income = filteredTransactions
-      .filter((t) => t.tipo === "receita")
-      .reduce((sum, t) => sum + t.valor, 0);
+      .filter((t) => toKind(t.tipo) === "receita")
+      .reduce((sum, t) => sum + Number(t.valor), 0);
 
     const expenses = filteredTransactions
-      .filter((t) => t.tipo === "despesa")
-      .reduce((sum, t) => sum + Math.abs(t.valor), 0);
+      .filter((t) => toKind(t.tipo) === "despesa")
+      .reduce((sum, t) => sum + Math.abs(Number(t.valor)), 0);
 
     const balance = income - expenses;
-
     return { income, expenses, balance };
   };
 
-  const { income, expenses, balance } = calculateSummary();
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4 text-muted-foreground">Carregando...</p>
-        </div>
-      </div>
-    );
-  }
+  const summary = calculateSummary();
 
   return (
     <div className="min-h-screen bg-background">
       <Header dateRange={dateRange} onDateRangeChange={setDateRange} />
-      
-      <div className="container mx-auto px-4 py-8">
-        <div className="mb-8 animate-slide-up">
-          <h1 className="text-4xl font-bold text-foreground mb-2">Dashboard Financeiro</h1>
-          <p className="text-muted-foreground">
-            Acompanhe suas finanças de forma simples e eficiente
-          </p>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="animate-slide-up-delay-1">
-            <FinanceSummaryCard
-              title="Receitas"
-              value={income}
-              icon={TrendingUp}
-              variant="income"
-            />
-          </div>
-          <div className="animate-slide-up-delay-2">
-            <FinanceSummaryCard
-              title="Despesas"
-              value={expenses}
-              icon={TrendingDown}
-              variant="expense"
-            />
-          </div>
-          <div className="animate-slide-up-delay-3">
-            <FinanceSummaryCard
-              title="Saldo"
-              value={balance}
-              icon={Wallet}
-              variant="balance"
-            />
-          </div>
+      <div className="container mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+          <FinanceSummaryCard
+            title="Entradas"
+            value={summary.income}
+            icon={<TrendingUp className="h-5 w-5 text-emerald-500" />}
+            trend="positivo"
+          />
+          <FinanceSummaryCard
+            title="Saídas"
+            value={summary.expenses}
+            icon={<TrendingDown className="h-5 w-5 text-rose-500" />}
+            trend="negativo"
+          />
+          <FinanceSummaryCard
+            title="Saldo"
+            value={summary.balance}
+            icon={<Wallet className="h-5 w-5 text-blue-500" />}
+            trend={summary.balance >= 0 ? "positivo" : "negativo"}
+          />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
           <ExpensesPieChartWithTabs transactions={filteredTransactions} />
-          <div className="animate-slide-up-delay-3">
-            <TransactionsList transactions={filteredTransactions} />
-          </div>
+          <TransactionsList transactions={filteredTransactions} />
         </div>
 
         <DailyMovementChart transactions={filteredTransactions} />
