@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 
 // sua imagem já está no projeto:
-import logo from "/assets/gestor-ia.png";
+import logo from "@/assets/gestor-ia.png";
 
 const Auth: React.FC = () => {
   // true = começar em Entrar | false = começar em Criar conta
