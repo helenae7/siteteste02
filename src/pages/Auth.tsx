@@ -1,36 +1,29 @@
 // src/pages/Auth.tsx
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 
-// Troque o caminho abaixo para a sua nova logo (ex.: gestor-ia.png)
+// Troque o caminho se sua logo tiver outro nome/locais:
 import logo from "@/assets/gestor-ia.png";
 
-const Auth = () => {
-  // mude para "true" se quiser iniciar na aba de login
-  const [isLogin, setIsLogin] = useState(false);
+const Auth: React.FC = () => {
+  // defina true para começar em "Entrar"
+  const [isLogin, setIsLogin] = useState<boolean>(true);
 
-  const [emailOrPhone, setEmailOrPhone] = useState("");
-  const [password, setPassword] = useState("");
-  const [username, setUsername] = useState("");
+  const [emailOrPhone, setEmailOrPhone] = useState<string>("");
+  const [password, setPassword] = useState<string>("");
+  const [username, setUsername] = useState<string>("");
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<boolean>(false);
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  // Se já estiver logado, vai direto para a Home
   useEffect(() => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -39,7 +32,6 @@ const Auth = () => {
     checkSession();
   }, [navigate]);
 
-  // Aceita telefone ou e-mail. Se for telefone, cria um e-mail interno para o Auth.
   const normalizeEmail = (value: string) => {
     if (!value) return "";
     return value.includes("@")
@@ -47,9 +39,9 @@ const Auth = () => {
       : `${value.replace(/\D/g, "")}@iazapuser.com`;
   };
 
-  // Garante que exista uma linha na TABELA DO SEU DB (usuarios)
-  // e retorna o id numérico (que usamos para filtrar transações)
+  // Garante linha na sua tabela "usuarios" e retorna o id numérico
   const ensureUsuarioRow = async (email: string, phoneGuess?: string) => {
+    // se a tabela não existir, isso vai lançar erro — tratamos abaixo
     const { data: found, error: findError } = await supabase
       .from("usuarios")
       .select("id")
@@ -57,20 +49,19 @@ const Auth = () => {
       .maybeSingle();
 
     if (findError) throw findError;
-    if (found?.id) return found.id;
+    if (found?.id) return found.id as number;
 
-    const insertPayload: Record<string, any> = {
+    const payload: any = {
       nome: username || "Usuário",
       email,
       telefone: phoneGuess || null,
       mensagens: 0,
       tem_plano: false,
-      // senha NÃO é salva aqui – fica apenas no Auth
     };
 
     const { data: inserted, error: insertError } = await supabase
       .from("usuarios")
-      .insert(insertPayload)
+      .insert(payload)
       .select("id")
       .single();
 
@@ -78,16 +69,24 @@ const Auth = () => {
     return inserted.id as number;
   };
 
-  // Após logar: garante usuário na tabela e salva o id localmente
   const completeLogin = async (email: string, phoneGuess?: string) => {
-    const usuarioId = await ensureUsuarioRow(email, phoneGuess);
-    localStorage.setItem("usuario_id", String(usuarioId));
-    toast({
-      title: "Login realizado!",
-      description: "Bem-vindo(a) 👋",
-      // shadcn/ui geralmente só tem "default" e "destructive"
-      // então deixamos "default" para sucesso (verde)
-    });
+    try {
+      const usuarioId = await ensureUsuarioRow(email, phoneGuess);
+      localStorage.setItem("usuario_id", String(usuarioId));
+    } catch (err: any) {
+      // Se aparecer "Não foi possível encontrar a tabela 'public.usuarios'...",
+      // significa que a tabela não existe no seu Supabase.
+      console.error("Erro ao garantir usuario:", err?.message || err);
+      toast({
+        title: "Falha ao logar",
+        description:
+          "Tabela 'usuarios' não encontrada no Supabase. Rode o SQL de criação ou ajuste o nome da tabela.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({ title: "Login realizado!", description: "Bem-vindo(a) 👋" });
     navigate("/");
   };
 
@@ -111,33 +110,22 @@ const Auth = () => {
     try {
       if (isLogin) {
         // ===== ENTRAR =====
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        if (data?.session) {
-          await completeLogin(email, phoneGuess);
-        }
+        if (data?.session) await completeLogin(email, phoneGuess);
       } else {
         // ===== CRIAR CONTA =====
-        const { error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-        });
+        // Cria no Auth (senha fica só no Auth)
+        const { error: signUpError } = await supabase.auth.signUp({ email, password });
         if (signUpError) throw signUpError;
 
-        // Login imediato após criar (se o provider exigir confirmação, desative no painel)
-        const { data, error: signInErr } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+        // Login imediato após cadastro (desative "Confirm email before sign in" no painel p/ funcionar)
+        const { data, error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
         if (signInErr) throw signInErr;
 
-        // Garante a linha em `usuarios`
+        // Garante perfil na sua tabela
         await completeLogin(email, phoneGuess);
 
-        // Toast “verde” de sucesso
         toast({
           title: "Conta criada com sucesso! 🎉",
           description: "Você já está logado(a).",
@@ -160,9 +148,7 @@ const Auth = () => {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-1 items-center">
           <img src={logo} alt="GESTOR IA" className="h-10 w-auto" />
-          <CardTitle className="text-2xl">
-            Agente <span className="text-primary">IA</span>
-          </CardTitle>
+          <CardTitle className="text-2xl">Agente <span className="text-primary">IA</span></CardTitle>
           <CardDescription>Use seu telefone ou e-mail cadastrado</CardDescription>
         </CardHeader>
 
@@ -204,7 +190,7 @@ const Auth = () => {
             </div>
 
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? (isLogin ? "Entrando..." : "Criando...") : isLogin ? "Entrar" : "Criar conta"}
+              {loading ? (isLogin ? "Entrando..." : "Criando...") : (isLogin ? "Entrar" : "Criar conta")}
             </Button>
 
             <Button
