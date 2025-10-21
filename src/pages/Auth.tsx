@@ -68,15 +68,63 @@ const Auth = () => {
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  e.preventDefault();
+  setLoading(true);
 
-    const email = normalizeEmail(emailOrPhone);
-    if (!email || !password) {
-      toast({ title: "Preencha todos os campos", variant: "destructive" });
-      setLoading(false);
+  const email = normalizeEmail(emailOrPhone);
+  if (!email || !password) {
+    toast({ title: "Preencha todos os campos", variant: "destructive" });
+    setLoading(false);
+    return;
+  }
+
+  try {
+    if (isLogin) {
+      // ENTRAR
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+
+      // garante linha em `usuarios`
+      const userId = await ensureUsuarioRow(email, emailOrPhone.includes("@") ? "" : emailOrPhone);
+      localStorage.setItem("usuario_id", String(userId));
+
+      toast({ title: "Login realizado!", variant: "success" });
+      navigate("/");
+      return;
+    } else {
+      // CRIAR CONTA
+      const { error: signUpError } = await supabase.auth.signUp({ email, password });
+      if (signUpError) throw signUpError;
+
+      // login imediato (se “Confirm email before sign in” estiver desativado)
+      const { data, error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInErr) throw signInErr;
+
+      // cria perfil na sua tabela `usuarios`
+      const userId = await ensureUsuarioRow(email, emailOrPhone.includes("@") ? "" : emailOrPhone);
+      localStorage.setItem("usuario_id", String(userId));
+
+      toast({
+        title: "Conta criada com sucesso! 🎉",
+        description: "Bem-vindo(a)! Você já está logado.",
+        variant: "success", // Shadcn suporta "default"/"destructive"; se não tiver "success", remova a prop
+      });
+
+      // aguarda 1.2s e vai pro dashboard
+      setTimeout(() => navigate("/"), 1200);
       return;
     }
+  } catch (err: any) {
+    console.error(err);
+    toast({
+      title: isLogin ? "Falha ao logar" : "Falha ao criar conta",
+      description: err?.message || "Verifique as credenciais",
+      variant: "destructive",
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
     try {
       if (isLogin) {
